@@ -46,6 +46,64 @@ go get github.com/shubzkothekar/antigravity-acp-go
 - **Auto-Provisioning**: Automatically fetches and verifies SHA-256 signatures of release binaries of the `agy` CLI from GitHub.
 - **CamelCase / SnakeCase Normalization**: Handles backwards compatibility for sessions files saved with older schema formats.
 
+## Architecture
+
+At its core, `antigravity-acp-go` is a **translation layer**. On one side it speaks the [Agent Client Protocol](https://agentclientprotocol.com) (JSON-RPC 2.0 over stdio) to an ACP-compatible editor; on the other it drives the official `agy` CLI as a subprocess and observes the results by tailing the SQLite conversation database that `agy` writes to. The `agy` process is treated as an opaque black box — this library never parses its stdout, it reads state exclusively from the on-disk database.
+
+```mermaid
+flowchart TB
+    Editor["ACP Editor / Client<br/>(Zed, custom app, …)"]
+
+    subgraph lib["antigravity-acp-go"]
+        direction TB
+        Server["<b>Server</b> (acp.go)<br/>JSON-RPC 2.0 over stdio<br/>request routing + notifications"]
+        Agent["<b>AgyAcpAgent</b> (agent.go)<br/>protocol orchestrator<br/>initialize · session · prompt · config"]
+
+        subgraph state["State"]
+            direction LR
+            Sessions["<b>SessionManager / Store</b><br/>(session.go)<br/>LRU cache + JSON persistence"]
+            Replay["<b>ReplayCache</b><br/>(agent.go)<br/>incremental history replay"]
+        end
+
+        Adapter["<b>Adapter</b> (adapter.go)<br/>subprocess lifecycle · cancel<br/>200ms DB poll ticker"]
+
+        subgraph decode["DB → ACP Pipeline"]
+            direction LR
+            DB["<b>ConversationDb</b><br/>(database.go)<br/>read steps table"]
+            Proto["<b>Protobuf Decoder</b><br/>(protobuf.go)<br/>zero-dependency parser"]
+            Trans["<b>Translator</b><br/>(translator.go)<br/>steps → SessionUpdate"]
+        end
+
+        Installer["<b>Installer</b> (installer.go)<br/>fetch + SHA-256 verify agy"]
+    end
+
+    Agy["<b>agy CLI</b><br/>(subprocess)"]
+    SQLite[("SQLite conversation DB<br/>~/.gemini/…/conversations/*.db")]
+
+    Editor <-->|"JSON-RPC requests /<br/>session/update notifications"| Server
+    Server --> Agent
+    Agent --> Sessions
+    Agent --> Replay
+    Agent --> Adapter
+    Installer -.->|"provisions binary"| Agy
+    Adapter -->|"exec -p prompt"| Agy
+    Agy -->|"writes steps"| SQLite
+    Adapter -->|"polls"| DB
+    Replay --> DB
+    DB --> Proto --> Trans
+    Trans -->|"streamed updates"| Agent
+```
+
+### Request lifecycle
+
+1. **Transport (`acp.go`).** `Server.Run` scans newline-delimited JSON-RPC messages off stdin, dispatching each request in its own goroutine and writing responses/notifications back to stdout via a mutex-guarded `ClientConn`.
+2. **Orchestration (`agent.go`).** `AgyAcpAgent` implements the ACP surface — `initialize`, the `session/*` methods, `session/prompt`, and `session/setConfigOption`. It owns session state, advertises available models and permission modes as config options, and injects a planning-mode preamble when the session is in `plan` mode.
+3. **Session state (`session.go`).** `SessionManager` keeps a bounded LRU of live sessions in memory, while `SessionStore` persists them to `sessions.json` with atomic writes. A custom `UnmarshalJSON` normalizes older snake_case snapshots to the current camelCase schema.
+4. **Execution (`adapter.go`).** For each prompt the `Adapter` spawns `agy -p <prompt>` with the correct `--add-dir`, `--model`, and permission flags, then starts a 200ms ticker that polls the conversation database for new steps. On the first prompt of a new session it diffs a directory snapshot to discover which `*.db` file `agy` created. Client cancels translate to `SIGINT` (or `Kill` on Windows).
+5. **Read pipeline (`database.go` → `protobuf.go` → `translator.go`).** New rows from the `steps` table are read through the Cgo-free `modernc.org/sqlite` driver, their protobuf blob columns (`step_payload`, `error_details`, `permissions`, `task_details`) are decoded by the hand-rolled parser, and the `Translator` converts them into ACP `SessionUpdate` notifications (agent message chunks, tool calls, plans, permission requests), optionally filtering `agy`'s "I will…" narration.
+6. **Replay vs. stream.** Live prompts run the translator in `ModeStream`; loading historical sessions runs it in `ModeReplay` through the `ReplayCache`, which memoizes decoded updates per conversation and only re-reads the tail of a database that has grown since it was last seen.
+7. **Provisioning (`installer.go`).** `EnsureAgy` resolves the right release asset for the host platform, downloads it, verifies its SHA-256 against a pinned table, and extracts the binary — unless `$AGY_BIN` or `$AGY_SKIP_DOWNLOAD` opts out.
+
 ## Usage
 
 Here is a simple example showing how to build an ACP server executable using the library:
