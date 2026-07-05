@@ -76,6 +76,60 @@ func main() {
 }
 ```
 
+### Programmatic API Usage
+
+You can also use the library programmatically in another Go application (without running an ACP JSON-RPC server) by interacting with the `AgyAcpAgent` directly and implementing the `Client` interface to receive streaming updates:
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+
+	antigravityacp "github.com/shubzkothekar/antigravity-acp-go"
+)
+
+// Implement the Client interface to receive real-time streamed updates
+type customClient struct{}
+
+func (c *customClient) Update(sessionID string, update *antigravityacp.SessionUpdate) error {
+	// Print only streamed text chunks from the agent in real time
+	if update.SessionUpdate == "agent_message_chunk" {
+		if content, ok := update.Content.(map[string]interface{}); ok {
+			fmt.Print(content["text"])
+		}
+	}
+	return nil
+}
+
+func (c *customClient) RequestPermission(params interface{}) (interface{}, error) {
+	return nil, nil // Return nil or hook custom interactive prompts here
+}
+
+func main() {
+	// Initialize store
+	store := antigravityacp.NewSessionStore("sessions.json", ".")
+
+	// Instantiating the agent
+	agent := antigravityacp.NewAgyAcpAgent("agy", "/path/to/conversations", ".", false, "1.0.0", store)
+	client := &customClient{}
+
+	// Start session
+	sessionID, _ := agent.NewSession(".", nil, client)
+	fmt.Printf("Created session ID: %s\n", sessionID)
+
+	// Run prompt
+	fmt.Println("Running prompt...")
+	outcome, err := agent.Prompt(sessionID, "List files in the current directory", client)
+	if err != nil {
+		log.Fatalf("prompt execution failed: %v", err)
+	}
+
+	fmt.Printf("\nFinished. Stop reason: %s\n", outcome.StopReason)
+}
+```
+
 ## Running Tests
 
 Run the E2E and unit test suite:
