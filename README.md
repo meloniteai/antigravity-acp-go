@@ -137,3 +137,16 @@ Run the E2E and unit test suite:
 ```bash
 go test -v ./...
 ```
+
+## Continuous Integration (CI)
+
+This repository includes a GitHub Actions test workflow under `.github/workflows/go.yml` that automates both unit testing and real `agy` CLI integration testing.
+
+To enable E2E prompt tests with a real `agy` process in CI, you must configure your API credentials using GitHub Secrets:
+
+1. Obtain a Gemini API Key from **Google AI Studio**.
+2. In your GitHub Repository, navigate to **Settings > Secrets and variables > Actions**.
+3. Create a new Repository Secret named `ANTIGRAVITY_API_KEY` (or `GEMINI_API_KEY`) and set its value to your API key.
+
+The CI environment will automatically inject this secret into the test environment, enabling the E2E `TestRealAgyPrompt` test. Otherwise, the E2E test will be gracefully skipped.
+
