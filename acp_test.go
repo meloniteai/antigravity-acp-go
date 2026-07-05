@@ -7,6 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -174,4 +177,95 @@ func TestE2EAcpServer(t *testing.T) {
 	if len(sessions) != 0 {
 		t.Errorf("expected 0 sessions after deletion, got %d", len(sessions))
 	}
+}
+
+func TestRealAgyPrompt(t *testing.T) {
+	apiKey := os.Getenv("ANTIGRAVITY_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("GEMINI_API_KEY")
+	}
+	gcpCreds := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+	if apiKey == "" && gcpCreds == "" {
+		t.Skip("Skipping TestRealAgyPrompt: no ANTIGRAVITY_API_KEY, GEMINI_API_KEY, or GOOGLE_APPLICATION_CREDENTIALS environment variable set")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "agy-acp-real-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	err = EnsureAgy(InstallOptions{
+		DestDir: tmpDir,
+		Log:     func(msg string) { t.Log(msg) },
+		Warn:    func(msg string) { t.Log("WARN:", msg) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	exeName := "agy"
+	if runtime.GOOS == "windows" {
+		exeName = "agy.exe"
+	}
+	agyBin := filepath.Join(tmpDir, exeName)
+
+	sessionsFile := filepath.Join(tmpDir, "sessions.json")
+	store := NewSessionStore(sessionsFile, tmpDir)
+
+	convDir := filepath.Join(tmpDir, "conversations")
+	_ = os.MkdirAll(convDir, 0755)
+
+	agent := NewAgyAcpAgent(agyBin, convDir, tmpDir, false, "1.0.0", store)
+
+	client := &mockPromptClient{
+		t: t,
+	}
+
+	sessionID, _ := agent.NewSession(tmpDir, nil, client)
+
+	t.Log("Running E2E prompt with real agy CLI...")
+	outcome, err := agent.Prompt(sessionID, "Please output exactly the word 'SUCCESS' and nothing else.", client)
+	if err != nil {
+		t.Fatalf("Prompt turn failed: %v", err)
+	}
+
+	if outcome.Error != "" {
+		t.Fatalf("Outcome reported error: %s", outcome.Error)
+	}
+
+	if !outcome.HadUpdates {
+		t.Error("expected prompt turn to produce streamed updates")
+	}
+
+	client.mu.Lock()
+	responseBody := client.receivedText
+	client.mu.Unlock()
+
+	t.Logf("Received response: %s", responseBody)
+	if !strings.Contains(strings.ToUpper(responseBody), "SUCCESS") {
+		t.Errorf("expected response to contain 'SUCCESS', got %q", responseBody)
+	}
+}
+
+type mockPromptClient struct {
+	t            *testing.T
+	mu           sync.Mutex
+	receivedText string
+}
+
+func (c *mockPromptClient) Update(sessionID string, update *SessionUpdate) error {
+	if update.SessionUpdate == "agent_message_chunk" {
+		if content, ok := update.Content.(map[string]interface{}); ok {
+			c.mu.Lock()
+			c.receivedText += AsStr(content["text"])
+			c.mu.Unlock()
+		}
+	}
+	return nil
+}
+
+func (c *mockPromptClient) RequestPermission(params interface{}) (interface{}, error) {
+	return nil, nil
 }

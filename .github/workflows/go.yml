@@ -22,4 +22,7 @@ jobs:
       run: go mod download
 
     - name: Run Tests
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        ANTIGRAVITY_API_KEY: ${{ secrets.ANTIGRAVITY_API_KEY }}
       run: go test -v ./...
