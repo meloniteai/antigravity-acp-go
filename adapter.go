@@ -100,6 +100,7 @@ func (a *Adapter) RunPrompt(sessionID string, session *Session, promptText strin
 
 	cmd := exec.Command(a.binary, args...)
 	cmd.Dir = effectiveCwd
+	cmd.Env = append(os.Environ(), "AGY_CONVERSATIONS_DIR="+a.conversationsDir)
 
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf

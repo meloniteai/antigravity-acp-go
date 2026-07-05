@@ -179,15 +179,26 @@ func TestE2EAcpServer(t *testing.T) {
 	}
 }
 
+func testResolveAgyBinary(downloaded string) string {
+	if _, err := os.Stat(downloaded); err == nil {
+		return downloaded
+	}
+	if env := os.Getenv("AGY_BIN"); env != "" {
+		return env
+	}
+	return "agy"
+}
+
 func TestRealAgyPrompt(t *testing.T) {
 	apiKey := os.Getenv("ANTIGRAVITY_API_KEY")
 	if apiKey == "" {
 		apiKey = os.Getenv("GEMINI_API_KEY")
 	}
 	gcpCreds := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	forceTest := os.Getenv("TEST_REAL_AGY") == "1" || os.Getenv("AGY_TEST") == "1"
 
-	if apiKey == "" && gcpCreds == "" {
-		t.Skip("Skipping TestRealAgyPrompt: no ANTIGRAVITY_API_KEY, GEMINI_API_KEY, or GOOGLE_APPLICATION_CREDENTIALS environment variable set")
+	if apiKey == "" && gcpCreds == "" && !forceTest {
+		t.Skip("Skipping TestRealAgyPrompt: no ANTIGRAVITY_API_KEY, GEMINI_API_KEY, or GOOGLE_APPLICATION_CREDENTIALS environment variable set. Set TEST_REAL_AGY=1 to force run with local OAuth credentials.")
 	}
 
 	tmpDir, err := os.MkdirTemp("", "agy-acp-real-test-")
@@ -209,13 +220,19 @@ func TestRealAgyPrompt(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		exeName = "agy.exe"
 	}
-	agyBin := filepath.Join(tmpDir, exeName)
+	agyBin := testResolveAgyBinary(filepath.Join(tmpDir, exeName))
 
 	sessionsFile := filepath.Join(tmpDir, "sessions.json")
 	store := NewSessionStore(sessionsFile, tmpDir)
 
-	convDir := filepath.Join(tmpDir, "conversations")
-	_ = os.MkdirAll(convDir, 0755)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	convDir := os.Getenv("AGY_CONVERSATIONS_DIR")
+	if convDir == "" {
+		convDir = filepath.Join(homeDir, ".gemini", "antigravity-cli", "conversations")
+	}
 
 	agent := NewAgyAcpAgent(agyBin, convDir, tmpDir, false, "1.0.0", store)
 
@@ -225,7 +242,7 @@ func TestRealAgyPrompt(t *testing.T) {
 
 	sessionID, _ := agent.NewSession(tmpDir, nil, client)
 
-	t.Log("Running E2E prompt with real agy CLI...")
+	t.Logf("Running E2E prompt with real agy CLI path: %s", agyBin)
 	outcome, err := agent.Prompt(sessionID, "Please output exactly the word 'SUCCESS' and nothing else.", client)
 	if err != nil {
 		t.Fatalf("Prompt turn failed: %v", err)

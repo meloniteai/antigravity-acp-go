@@ -204,7 +204,6 @@ func EnsureAgy(opts InstallOptions) error {
 	dest := filepath.Join(opts.DestDir, exeName)
 
 	if fi, err := os.Stat(dest); err == nil && !fi.IsDir() {
-		// already present, executable check not strictly necessary on windows, on Unix we can check mode but usually os.Stat existence is fine
 		opts.Log(fmt.Sprintf("[agy-acp] agy already present (%s)", dest))
 		return nil
 	}
@@ -212,7 +211,31 @@ func EnsureAgy(opts InstallOptions) error {
 	url := ReleaseURL(release.Asset)
 	opts.Log(fmt.Sprintf("[agy-acp] agy not found — downloading v%s for %s...", AgyVersion, platformKey))
 
-	resp, err := http.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+
+	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" {
+		token = os.Getenv("GH_TOKEN")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "token "+token)
+	}
+
+	client := &http.Client{
+		CheckRedirect: func(r *http.Request, via []*http.Request) error {
+			if len(via) > 0 {
+				if r.URL.Host != via[0].URL.Host {
+					r.Header.Del("Authorization")
+				}
+			}
+			return nil
+		},
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		opts.Warn(fmt.Sprintf("[agy-acp] WARN: network error downloading agy: %v. Set $AGY_BIN as a workaround.", err))
 		return nil
