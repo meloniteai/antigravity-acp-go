@@ -124,10 +124,10 @@ func (s *Server) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 
 func (s *Server) handleRequest(method string, params json.RawMessage, client Client) (interface{}, error) {
 	switch method {
-	case "agent/initialize":
+	case "initialize", "agent/initialize":
 		return s.agent.Initialize(), nil
 
-	case "agent/authenticate":
+	case "authenticate", "agent/authenticate":
 		var p struct {
 			MethodID string `json:"methodId"`
 		}
@@ -138,7 +138,7 @@ func (s *Server) handleRequest(method string, params json.RawMessage, client Cli
 		}
 		return map[string]interface{}{}, nil
 
-	case "agent/logout":
+	case "logout", "agent/logout":
 		s.agent.Logout()
 		return map[string]interface{}{}, nil
 
@@ -236,7 +236,7 @@ func (s *Server) handleRequest(method string, params json.RawMessage, client Cli
 			"stopReason": outcome.StopReason,
 		}, nil
 
-	case "session/setConfigOption":
+	case "session/set_config_option", "session/setConfigOption":
 		var p struct {
 			SessionID string      `json:"sessionId"`
 			ConfigID  string      `json:"configId"`
