@@ -96,6 +96,9 @@ func (a *Adapter) RunPrompt(sessionID string, session *Session, promptText strin
 	if pm == "bypassPermissions" || pm == "bypass" || pm == "dontAsk" {
 		args = append(args, "--dangerously-skip-permissions")
 	}
+	if pm == "plan" {
+		args = append(args, "--mode", "plan")
+	}
 	args = append(args, "-p", promptText)
 
 	cmd := exec.Command(a.binary, args...)

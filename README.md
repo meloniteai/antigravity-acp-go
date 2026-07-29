@@ -40,7 +40,7 @@ go get github.com/shubzkothekar/antigravity-acp-go
 
 ## Features
 
-- **Standard ACP Implementation**: Supports `agent/initialize`, `session/new`, `session/load`, `session/resume`, `session/list`, `session/delete`, `session/close`, `session/prompt`, and `session/setConfigOption`.
+- **ACP v1 stdio server**: The included `antigravity-acp` command supports `initialize`, `authenticate`, `logout`, `session/new`, `session/load`, `session/resume`, `session/list`, `session/delete`, `session/close`, `session/prompt`, `session/cancel`, and `session/set_config_option`. Legacy method spellings remain accepted for older clients.
 - **Pure Go Protobuf Decoding**: Custom binary protobuf parser decodes steps payload, error details, permissions request, and task details columns out of SQLite databases with zero dependencies.
 - **Asynchronous Loop Ticker**: Runs live database step checks in goroutines, enabling concurrency and immediate processing of client cancels.
 - **Auto-Provisioning**: Automatically fetches and verifies SHA-256 signatures of release binaries of the `agy` CLI from GitHub.
@@ -105,6 +105,19 @@ flowchart TB
 7. **Provisioning (`installer.go`).** `EnsureAgy` resolves the right release asset for the host platform, downloads it, verifies its SHA-256 against a pinned table, and extracts the binary — unless `$AGY_BIN` or `$AGY_SKIP_DOWNLOAD` opts out.
 
 ## Usage
+
+Build the included stdio server. The state directory is explicit, so a host can
+keep its agent state wherever it owns it:
+
+```bash
+go build -o antigravity-acp ./cmd/antigravity-acp
+antigravity-acp --state-dir /path/to/state
+```
+
+It uses `agy` from `--agy`, `AGY_BIN`, or `PATH`; otherwise it downloads the
+verified upstream binary to `<state-dir>/bin`. Pass `--conversations-dir` when
+the `agy` conversation database is not in its standard location. The process
+uses stdin/stdout exclusively for JSON-RPC and writes diagnostics to stderr.
 
 Here is a simple example showing how to build an ACP server executable using the library:
 
@@ -239,4 +252,3 @@ The CI environment will automatically inject this secret into the test environme
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
-

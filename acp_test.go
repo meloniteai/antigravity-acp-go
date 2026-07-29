@@ -120,10 +120,10 @@ func TestE2EAcpServer(t *testing.T) {
 		return nil
 	}
 
-	// 1. Initialize
-	resp := sendRequest("agent/initialize", map[string]interface{}{}, 1)
+	// 1. Initialize with the current ACP v1 method name.
+	resp := sendRequest("initialize", map[string]interface{}{}, 1)
 	if resp == nil {
-		t.Fatal("no response for agent/initialize")
+		t.Fatal("no response for initialize")
 	}
 	result, ok := resp["result"].(map[string]interface{})
 	if !ok {
@@ -145,7 +145,7 @@ func TestE2EAcpServer(t *testing.T) {
 	}
 
 	// 3. Set config option
-	resp = sendRequest("session/setConfigOption", map[string]interface{}{
+	resp = sendRequest("session/set_config_option", map[string]interface{}{
 		"sessionId": sessionID,
 		"configId":  "mode",
 		"value":     "plan",
@@ -176,6 +176,21 @@ func TestE2EAcpServer(t *testing.T) {
 	sessions, _ = result["sessions"].([]interface{})
 	if len(sessions) != 0 {
 		t.Errorf("expected 0 sessions after deletion, got %d", len(sessions))
+	}
+}
+
+func TestServerAcceptsLegacyMethodAliases(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewSessionStore(filepath.Join(tmpDir, "sessions.json"), tmpDir)
+	agent := NewAgyAcpAgent("mock-agy", tmpDir, tmpDir, false, "1.0.0", store)
+	server := NewServer(agent)
+
+	result, err := server.handleRequest("agent/initialize", nil, NewClientConn(io.Discard))
+	if err != nil {
+		t.Fatalf("legacy initialize: %v", err)
+	}
+	if _, ok := result.(*InitializeResponse); !ok {
+		t.Fatalf("legacy initialize result = %T, want *InitializeResponse", result)
 	}
 }
 
